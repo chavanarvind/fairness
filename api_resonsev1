@@ -1,0 +1,138 @@
+Model Bias Detection: 
+
+
+Screen 1- upload excel
+
+-----------------------------
+Screen 2- 
+
+API RESPONSE required on pageload to populate dropdowns-
+
+{
+	"domain": [
+        	"Healthcare",
+        	"Finance",
+		"Manufacturing",
+        	"Others"
+	],
+
+	"protected_attribute": [
+        	"GENDER", 
+        	"RACE"
+	],
+
+	"metrics": [
+		"Demographic Parity",
+		"Equalized Odds",
+		"Equality of Opportunity",
+        	"Predictive Rate Parity"
+	],
+
+ 	"metadata": {
+        "errorMessage": "",
+        "isSuccess": true,
+        "status": 200
+    },
+    "status": 200
+}
+
+-------------------------------------------------------
+On Click of button- 
+
+REQUEST header :
+
+{
+	"domain": "Health",
+
+	"protected_attribute": [
+		"Gender",
+		"Race"
+		],
+
+	"metrics": [
+		"Demographic Parity",
+		"Equalized Odds",
+		]
+	
+}
+
+RESPONSE:
+
+{
+	"Gauge": [
+		{
+			"metric": "accuracy_parity",
+			"Datapoints": [
+				{
+					"protected_attribute": "Gender",
+					"rate": 0.77
+				},
+				{
+					"protected_attribute": "Race",
+					"rate": 0.66
+				}
+			]
+		},
+		{
+			"metric": "equalized_odds",
+			"Datapoints": [
+				{
+					"protected_attribute": "Gender",
+					"rate": 0.77
+				},
+				{
+					"protected_attribute": "Race",
+					"rate": 0.66
+				}
+			]
+		}
+	],
+	"Table": [
+		{
+			"metric": "accuracy_parity",
+			"Datapoints": [
+				{
+					"protected_attribute": "Race",
+					"privleged": "60%",
+					"non_privleged": "40%",
+					"ratio": 0.54
+				},
+				{
+					"protected_attribute": "Gender",
+					"privleged": "70%",
+					"non_privleged": "30%",
+					"ratio": 0.54
+				}
+			]
+		}
+	],
+	"charts": [
+		{
+			"ChartName": "MaleGroup",
+			"Datapoints": [
+				{
+					"SeriesName": "True Positive",
+					"Value": 50
+				},
+				{
+					"SeriesName": "True Negative",
+					"Value": 30
+				},
+				{
+					"SeriesName": "False Positive",
+					"Value": 10
+				},
+				{
+					"SeriesName": "False Negative",
+					"Value": 10
+				}
+			]
+		}
+	],
+	"metadata": {
+		"errorMessage": "",
+		"isSuccess": true,
+		"status": 200
+	},
+	"status": 200
+}
