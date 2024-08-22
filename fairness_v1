@@ -1,0 +1,222 @@
+import plotly.graph_objs as go
+import ast
+from datetime import datetime
+from typing import List, Optional
+import numpy as np
+import shap
+import mlflow
+import pandas as pd
+import lime.lime_tabular
+from matplotlib import pyplot as plt
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from aif360.sklearn.metrics import statistical_parity_difference,equal_opportunity_difference,average_odds_difference,selection_rate
+from sklearn.metrics import confusion_matrix
+import random
+from fairlearn.metrics import demographic_parity_difference,equalized_odds_difference
+from aif360.datasets import AdultDataset, GermanDataset, CompasDataset
+from aif360.algorithms.preprocessing.optim_preproc_helpers.data_preproc_functions\
+        import load_preproc_data_adult, load_preproc_data_german, load_preproc_data_compas
+from aif360.datasets import Dataset,BinaryLabelDataset
+from RLPredictionEngine.Configuration import configuration as cfg
+from RLPredictionEngine.Logger import AIStudioLogger
+from RLPredictionEngine.Data.DataCoordinator import DataCoordinatorClass
+from RLPredictionEngine.Data.ArtifactStoreManager import ArtifactStoreManager, Artifact
+from RLPredictionEngine.ModelEvaluation.APIMLModelEvaluatorDynamic import MLClassifierTester
+
+class ClassificationModelFairnessMetrics:
+    def __init__(self, input_data: dict, protected_attribute, privileged_group=None):
+        self.mlflow_run_id: str = input_data.get("mlflow_run_id")
+        self.artifact_uri: str = input_data.get("artifact_uri")
+        self.model_name: str = input_data.get("model_name")
+        self.target=input_data.get("target")
+        self.columns: list=input_data.get("columns")
+        #self.y_true = np.array(y_true)
+        #self.y_pred = np.array(y_pred)
+        self.protected_attribute = np.array(protected_attribute)
+        self.privileged_group = privileged_group
+        self.favourable_label = 1
+        self.logger: AIStudioLogger = AIStudioLogger.get_instance()
+        self.data_coordinator = DataCoordinatorClass(self.logger)
+        self.artifact_manager: ArtifactStoreManager = ArtifactStoreManager.get_instance()
+        self.test_with_pred=self.artifact_manager.read_artifact(self.artifact_uri,f"Predictions_{self.standard_model_name}",Artifact.CSV)
+        self.y_pred =np.array(self.test_with_pred['Prediction'])
+        self.y_true=np.array(self.test_with_pred.drop(columns=['Prediction'],inplace=True))
+        if self.privileged_group is None:
+            self.infer_privileged_group()
+
+        self.performance_measures = self._compute_performance_measures()
+
+    def infer_privileged_group(self):
+        """
+        If not provided the group which has the largest count in the protected
+        attribute becomes the privileged group
+        :return:
+        """
+        # Determine the privileged group based on the largest count in the protected attribute
+        unique, counts = np.unique(self.protected_attribute, return_counts=True)
+        self.privileged_group = unique[np.argmax(counts)]
+
+    def _compute_performance_measures(self):
+        """
+        Compute the confusion matrix for
+         unprivileged and privileged groups of the protected attribute
+         Example:
+             {'privileged':{'tp':20,'fp':10,'tn':1000,'fn':200},
+              'unprivileged':{'tp':120,'fp':10,'tn':300,'fn':100}
+              }
+        :return:
+        """
+        measures = {'privileged': {}, 'unprivileged': {}}
+
+        privileged_indices = np.where(self.protected_attribute == self.privileged_group)[0]
+        unprivileged_indices = np.where(self.protected_attribute != self.privileged_group)[0]
+
+        for group, indices in zip(['privileged', 'unprivileged'], [privileged_indices, unprivileged_indices]):
+            y_true_group = self.y_true[indices]
+            y_pred_group = self.y_pred[indices]
+            tn, fp, fn, tp = confusion_matrix(y_true_group, y_pred_group, labels=[0, 1]).ravel()
+            measures[group] = {'tp': tp, 'fp': fp, 'tn': tn, 'fn': fn}
+        return measures
+
+    def _combined_count(self):
+        total_counts = np.sum([list(metrics.values()) for metrics in self.performance_measures.values()], axis=0)
+        return total_counts
+
+    def selection_rate(self, privileged=None):
+        """
+       If privileged is None then calculate for all.
+       Else if True calculate only for privileged group else for the other group
+       Formula: (tp+fp)/Total Instances
+       :param privileged:
+       :return:
+       """
+        if privileged is None:
+            tp, fp, tn, fn = self._combined_count()
+            return (tp + fp) / (tp + fp + tn + fn)
+        else:
+            group = 'privileged' if privileged else 'unprivileged'
+            tp, fp, tn, fn = self.performance_measures[group].values()
+            return (tp + fp) / (tp + fp + tn + fn)
+
+    def true_positive_rate(self, privileged=None):
+        """
+        If privileged is None then calculate for all.
+        Else if True calculate only for privileged group else for the other group
+        Formula=TP/(TP+FN)
+        :param privileged:
+        :return:
+        """
+        if privileged is None:
+            tp, fp, tn, fn = self._combined_count()
+            return tp / (tp + fn)
+        else:
+            group = 'privileged' if privileged else 'unprivileged'
+            tp, fp, tn, fn = self.performance_measures[group].values()
+            return tp / (tp + fn)
+
+    def false_positive_rate(self, privileged=None):
+        """
+        If privileged is None then calculate for all.
+        Else if True calculate only for privileged group else for the other group
+        Formula=FP/(TN+FP)
+        :param privileged:
+        :return:
+        """
+        if privileged is None:
+            tp, fp, tn, fn = self._combined_count()
+            return fp / (fp + tn)
+        else:
+            group = 'privileged' if privileged else 'unprivileged'
+            tp, fp, tn, fn = self.performance_measures[group].values()
+            return fp / (fp + tn)
+
+    def true_negative_rate(self, privileged=None):
+        """
+       If privileged is None then calculate for all.
+       Else if True calculate only for privileged group else for the other group
+       Formula=TN/(TN+FP)
+       :param privileged:
+       :return:
+       """
+
+        if privileged is None:
+            tp, fp, tn, fn = self._combined_count()
+            return tn / (tn + fp)
+        else:
+            group = 'privileged' if privileged else 'unprivileged'
+            tp, fp, tn, fn = self.performance_measures[group].values()
+            return tn / (tn + fp)
+
+    def false_negative_rate(self, privileged=None):
+        """
+        If privileged is None then calculate for all.
+        Else if True calculate only for privileged group else for the other group
+        Formula=FN/(TP+FN)
+        :param privileged:
+        :return:
+        """
+        if privileged is None:
+            tp, fp, tn, fn = self._combined_count()
+            return fn / (fn + tp)
+        else:
+            group = 'privileged' if privileged else 'unprivileged'
+            tp, fp, tn, fn = self.performance_measures[group].values()
+            return fn / (fn + tp)
+
+    def true_positive_rate_difference(self):
+        """
+       Difference in TPR of Unprivileged and Privileged
+       :return:
+       """
+        return self.true_positive_rate(privileged=False) - self.true_positive_rate(privileged=True)
+
+    def false_positive_rate_difference(self):
+        """
+        Difference in FPR of Unprivileged and Privileged
+        :return:
+        """
+        return self.false_positive_rate(privileged=False) - self.false_positive_rate(privileged=True)
+
+    def true_negative_rate_difference(self):
+        """
+        Difference in TNR of Unprivileged and Privileged
+        :return:
+        """
+        return self.true_negative_rate(privileged=False) - self.true_negative_rate(privileged=True)
+
+    def false_negative_rate_difference(self):
+        """
+       Difference in FNR of Unprivileged and Privileged
+       :return:
+       """
+        return self.false_negative_rate(privileged=False) - self.false_negative_rate(privileged=True)
+
+    def statistical_parity_difference(self):
+        """
+        Difference in Selection Rate of Unprivileged and Privileged
+        :return:
+        """
+        return self.selection_rate(privileged=False) - self.selection_rate(privileged=True)
+
+    def disparate_impact(self):
+        """
+       Ratio of Selection Rate of Unprivileged and Privileged
+       :return:
+       """
+        return self.selection_rate(privileged=False) / self.selection_rate(privileged=True)
+
+    def equal_opportunity_difference(self):
+        """
+       Alias for TPR Difference
+       :return:
+       """
+        return self.true_positive_rate_difference()
+
+    def average_odds_difference(self):
+        """
+      Average of difference in FPR and TPR for unprivileged and privileged
+      groups:
+      :return:
+      """
+        return (self.false_positive_rate_difference() + self.true_positive_rate_difference()) / 2
