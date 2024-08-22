@@ -1,0 +1,251 @@
+import numpy as np
+from sklearn.metrics import confusion_matrix
+
+class ClassificationModelFairnessMetrics:
+    def __init__(self, input_data: dict, protected_attribute, privileged_group=None):
+        self.mlflow_run_id: str = input_data.get("mlflow_run_id")
+        self.artifact_uri: str = input_data.get("artifact_uri")
+        self.model_name: str = input_data.get("model_name")
+        self.target = input_data.get("target")
+        self.columns: list = input_data.get("columns")
+        self.protected_attribute = np.array(protected_attribute)
+        self.privileged_group = privileged_group
+        self.favourable_label = 1
+
+        # Dummy data - replace with actual model predictions and true labels
+        self.y_pred = np.array([0, 1, 0, 1, 0, 1, 0, 1])
+        self.y_true = np.array([0, 1, 0, 1, 0, 1, 0, 1])
+
+        if self.privileged_group is None:
+            self.infer_privileged_group()
+
+        self.performance_measures = self._compute_performance_measures()
+
+    def infer_privileged_group(self):
+        unique, counts = np.unique(self.protected_attribute, return_counts=True)
+        self.privileged_group = unique[np.argmax(counts)]
+
+    def _compute_performance_measures(self):
+        measures = {'privileged': {}, 'unprivileged': {}}
+
+        privileged_indices = np.where(self.protected_attribute == self.privileged_group)[0]
+        unprivileged_indices = np.where(self.protected_attribute != self.privileged_group)[0]
+
+        for group, indices in zip(['privileged', 'unprivileged'], [privileged_indices, unprivileged_indices]):
+            y_true_group = self.y_true[indices]
+            y_pred_group = self.y_pred[indices]
+            tn, fp, fn, tp = confusion_matrix(y_true_group, y_pred_group, labels=[0, 1]).ravel()
+            measures[group] = {'tp': tp, 'fp': fp, 'tn': tn, 'fn': fn}
+        return measures
+
+    def _combined_count(self):
+        total_counts = np.sum([list(metrics.values()) for metrics in self.performance_measures.values()], axis=0)
+        return total_counts
+
+    def selection_rate(self, privileged=None):
+        if privileged is None:
+            tp, fp, tn, fn = self._combined_count()
+            return (tp + fp) / (tp + fp + tn + fn)
+        else:
+            group = 'privileged' if privileged else 'unprivileged'
+            tp, fp, tn, fn = self.performance_measures[group].values()
+            return (tp + fp) / (tp + fp + tn + fn)
+
+    def true_positive_rate(self, privileged=None):
+        if privileged is None:
+            tp, fp, tn, fn = self._combined_count()
+            return tp / (tp + fn)
+        else:
+            group = 'privileged' if privileged else 'unprivileged'
+            tp, fp, tn, fn = self.performance_measures[group].values()
+            return tp / (tp + fn)
+
+    def false_positive_rate(self, privileged=None):
+        if privileged is None:
+            tp, fp, tn, fn = self._combined_count()
+            return fp / (fp + tn)
+        else:
+            group = 'privileged' if privileged else 'unprivileged'
+            tp, fp, tn, fn = self.performance_measures[group].values()
+            return fp / (fp + tn)
+
+    def true_negative_rate(self, privileged=None):
+        if privileged is None:
+            tp, fp, tn, fn = self._combined_count()
+            return tn / (tn + fp)
+        else:
+            group = 'privileged' if privileged else 'unprivileged'
+            tp, fp, tn, fn = self.performance_measures[group].values()
+            return tn / (tn + fp)
+
+    def false_negative_rate(self, privileged=None):
+        if privileged is None:
+            tp, fp, tn, fn = self._combined_count()
+            return fn / (fn + tp)
+        else:
+            group = 'privileged' if privileged else 'unprivileged'
+            tp, fp, tn, fn = self.performance_measures[group].values()
+            return fn / (fn + tp)
+
+    def true_positive_rate_difference(self):
+        return self.true_positive_rate(privileged=False) - self.true_positive_rate(privileged=True)
+
+    def false_positive_rate_difference(self):
+        return self.false_positive_rate(privileged=False) - self.false_positive_rate(privileged=True)
+
+    def true_negative_rate_difference(self):
+        return self.true_negative_rate(privileged=False) - self.true_negative_rate(privileged=True)
+
+    def false_negative_rate_difference(self):
+        return self.false_negative_rate(privileged=False) - self.false_negative_rate(privileged=True)
+
+    def statistical_parity_difference(self):
+        return self.selection_rate(privileged=False) - self.selection_rate(privileged=True)
+
+    def disparate_impact(self):
+        return self.selection_rate(privileged=False) / self.selection_rate(privileged=True)
+
+    def equal_opportunity_difference(self):
+        return self.true_positive_rate_difference()
+
+    def average_odds_difference(self):
+        return (self.false_positive_rate_difference() + self.true_positive_rate_difference()) / 2
+
+    @staticmethod
+    def get_available_domains():
+        return {
+            "domain": ["Healthcare", "Finance", "Manufacturing", "Others"],
+            "metadata": {
+                "errorMessage": "",
+                "isSuccess": True,
+                "status": 200
+            },
+            "status": 200
+        }
+
+    def get_protected_attributes(self):
+        return {
+            "protected_attribute": ["GENDER", "RACE", "AGE", "Marital Status", "CHILDREN"],
+            "metadata": {
+                "errorMessage": "",
+                "isSuccess": True,
+                "status": 200
+            },
+            "status": 200
+        }
+
+    def get_fairness_metrics(self):
+        return {
+            "metrics": ["Demographic Parity", "Equalized Odds", "Equality of Opportunity", "Predictive Rate Parity"],
+            "metadata": {
+                "errorMessage": "",
+                "isSuccess": True,
+                "status": 200
+            },
+            "status": 200
+        }
+
+    def get_models(self):
+        return {
+            "model": ["Random Forest", "XGBoost", "SVM", "Logistic Regression"],
+            "metadata": {
+                "errorMessage": "",
+                "isSuccess": True,
+                "status": 200
+            },
+            "status": 200
+        }
+
+    def get_attribute_and_metrics(self):
+        attribute_options = self.get_protected_attributes()["protected_attribute"]
+        fairness_metrics = self.get_fairness_metrics()["metrics"]
+        models = self.get_models()["model"]
+
+        return {
+            "attribute_results": [
+                {"attribute_label": attr, "attribute_id": idx + 1}
+                for idx, attr in enumerate(attribute_options)
+            ],
+            "fairness_metrics": [
+                {"group_label": metric, "group_id": idx + 1}
+                for idx, metric in enumerate(fairness_metrics)
+            ],
+            "model": [
+                {"model_label": model, "model_id": idx + 1}
+                for idx, model in enumerate(models)
+            ],
+            "metadata": {
+                "errorMessage": "",
+                "isSuccess": True,
+                "status": 200
+            },
+            "status": 200
+        }
+
+    def detect_bias(self, selected_attributes, metrics):
+        data_kpis = {
+            "Demographic_parity": {"rate": round(self.statistical_parity_difference(), 3)},
+            "Equalized_ods": {"rate": round(self.average_odds_difference(), 3)},
+            "Equality_of_oppurtunity": {"rate": round(self.equal_opportunity_difference(), 3)},
+            "Predictive_rate_parity": {"rate": round(self.disparate_impact(), 3)}
+        }
+
+        gauge_entries = []
+        table_entries = []
+        charts = []
+
+        for attribute in selected_attributes:
+            attribute_indices = np.where(self.protected_attribute == attribute)[0]
+            if len(attribute_indices) == 0:
+                continue
+
+            y_true_attr = self.y_true[attribute_indices]
+            y_pred_attr = self.y_pred[attribute_indices]
+            tn, fp, fn, tp = confusion_matrix(y_true_attr, y_pred_attr, labels=[0, 1]).ravel()
+
+            privileged_count = np.sum(self.protected_attribute == attribute)
+            unprivileged_count = len(self.protected_attribute) - privileged_count
+
+            for metric in metrics:
+                gauge_entries.append({
+                    "metric": metric.replace(" ", "_").lower(),
+                    "Datapoints": [
+                        {"protected_attribute": attribute, "rate": tp / (tp + fn) if metric == "Equalized Odds" else (tp + fp) / (tp + fp + tn + fn)},
+                        {"protected_attribute": attribute, "rate": unprivileged_count / (privileged_count + unprivileged_count) if metric == "Demographic Parity" else (fp / (fp + tn))}
+                    ]
+                })
+
+                table_entries.append({
+                    "metric": metric.replace(" ", "_").lower(),
+                    "Datapoints": [
+                        {
+                            "protected_attribute": attribute,
+                            "privleged": f"{privileged_count / len(self.protected_attribute) * 100:.0f}%",
+                            "non_privleged": f"{unprivileged_count / len(self.protected_attribute) * 100:.0f}%",
+                            "ratio": privileged_count / unprivileged_count if unprivileged_count > 0 else "N/A"
+                        }
+                    ]
+                })
+
+            charts.append({
+                "ChartName": attribute,
+                "Datapoints": [
+                    {"SeriesName": "True Positive", "Value": tp},
+                    {"SeriesName": "True Negative", "Value": tn},
+                    {"SeriesName": "False Positive", "Value": fp},
+                    {"SeriesName": "False Negative", "Value": fn}
+                ]
+            })
+
+        return {
+            "Gauge": gauge_entries,
+            "Table": table_entries,
+            "charts": charts,
+            "metadata": {
+                "errorMessage": "",
+                "isSuccess": True,
+                "status": 200
+            },
+            "status": 200
+        }
+
