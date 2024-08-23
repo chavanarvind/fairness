@@ -1,0 +1,22 @@
+AGE,GENDER,RACE,DRIVING_EXPERIENCE,EDUCATION,INCOME,CREDIT_SCORE,New to credit,VEHICLE_OWNERSHIP,VEHICLE_YEAR,Marital status,CHILDREN,ANNUAL_MILEAGE,VEHICLE_TYPE,SPEEDING_VIOLATIONS,DUIS (number of times driving under the influence),No_PAST_ACCIDENTS,CLAIM,Prediction
+26-39,female,majority,10-19y,university,upper class,727,No,Owner,before 2015,Married,Yes,15000,sedan,2,0,0,0,0
+65+,male,majority,30y+,university,upper class,0,Yes, others,after 2015,Single,Yes,12000,sports car,6,0,5,0,0
+26-39,female,majority,0-9y,university,working class,469,No, others,after 2015,Single,Yes,14000,sedan,0,0,0,1,1
+65+,male,majority,30y+,high school,upper class,493,No, others,after 2015,Married,Yes,13000,sedan,7,0,3,0,0
+26-39,female,minority,10-19y,none,working class,504,No, others,before 2015,Single,Yes,14000,sedan,1,0,0,0,1
+40-64,female,majority,0-9y,university,upper class,614,No,Owner,before 2015,Single,No,,sedan,0,0,0,0,1
+40-64,female,minority,10-19y,high school,working class,533,No,Owner,before 2015,Married,Yes,11000,sedan,0,0,0,0,0
+16-25,female,majority,0-9y,university,upper class,591,No,Owner,before 2015,Single,Yes,,sedan,0,0,0,0,1
+16-25,male,majority,0-9y,university,upper class,585,No,Owner,before 2015,Married,Yes,12000,sports car,0,0,0,1,1
+16-25,male,majority,0-9y,none,poverty,0,Yes, others,before 2015,Married,No,12000,sedan,0,0,0,1,0
+40-64,female,majority,0-9y,high school,upper class,562,No,Owner,before 2015,Single,Yes,11000,sedan,0,0,0,1,0
+26-39,female,majority,0-9y,university,upper class,764,No,Owner,before 2015,Married,Yes,12000,sedan,0,0,0,0,1
+40-64,male,majority,20-29y,university,upper class,480,No, others,after 2015,Married,No,14000,sedan,1,0,2,0,0
+40-64,female,majority,20-29y,university,middle class,388,No, others,after 2015,Single,Yes,12000,sedan,2,0,1,0,0
+65+,male,majority,10-19y,university,upper class,694,No,Owner,before 2015,Married,Yes,10000,sedan,2,0,0,0,0
+26-39,female,majority,0-9y,high school,working class,511,No,Owner,after 2015,Married,Yes,,sedan,0,0,0,0,1
+26-39,male,majority,10-19y,university,upper class,0,Yes,Owner,before 2015,Married,Yes,8000,sedan,2,0,1,0,0
+26-39,male,majority,10-19y,university,upper class,0,Yes,Owner,after 2015,Married,Yes,11000,sedan,3,1,0,0,0
+16-25,female,majority,0-9y,university,middle class,615,No,Owner,before 2015,Single,Yes,15000,sedan,0,0,0,1,1
+40-64,female,majority,20-29y,university,middle class,570,No,Owner,after 2015,Married,Yes,,sedan,0,0,0,0,0
+65+,male,majority,30y+,high school,upper class,620,No,Owner,after 2015,Married,Yes,10000,sedan,6,2,7,0,0
