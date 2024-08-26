@@ -1,0 +1,198 @@
+from flask import Flask, request, jsonify
+import pandas as pd
+import numpy as np
+from werkzeug.utils import secure_filename
+import os
+from sklearn.metrics import confusion_matrix
+
+app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = './uploads'
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+class ClassificationModelFairnessMetrics:
+    def __init__(self, input_data: dict, protected_attribute: np.ndarray):
+        self.protected_attribute = protected_attribute
+        self.df = pd.read_csv(input_data.get("file"))
+
+        self.y_true = self.df['CLAIM'].values
+        self.y_pred = self.df['Prediction'].values
+
+    def infer_privileged_group(self):
+        unique, counts = np.unique(self.protected_attribute, return_counts=True)
+        self.privileged_group = unique[np.argmax(counts)]
+
+    def _compute_performance_measures(self):
+        measures = {}
+        unique_protected_attributes = np.unique(self.protected_attribute)
+        
+        for attr in unique_protected_attributes:
+            indices = np.where(self.protected_attribute == attr)[0]
+            y_true_group = self.y_true[indices]
+            y_pred_group = self.y_pred[indices]
+            tn, fp, fn, tp = confusion_matrix(y_true_group, y_pred_group, labels=[0, 1]).ravel()
+            measures[attr] = {'tp': tp.item(), 'fp': fp.item(), 'tn': tn.item(), 'fn': fn.item()}
+        
+        return measures
+
+    def detect_bias(self, selected_attributes, metrics):
+        self.infer_privileged_group()
+        results = {
+            "Gauge": [],
+            "Table": [],
+            "charts": [],
+            "metadata": {"errorMessage": "", "isSuccess": True, "status": 200}
+        }
+
+        performance_measures = self._compute_performance_measures()
+
+        for metric in metrics:
+            if metric == "Demographic Parity":
+                for attr, measures in performance_measures.items():
+                    privileged_rate = self.selection_rate(privileged=attr)
+                    results["Gauge"].append({
+                        "metric": metric,
+                        "Datapoints": [
+                            {"protected_attribute": attr, "rate": float(privileged_rate)}
+                        ]
+                    })
+
+                    results["Table"].append({
+                        "metric": metric,
+                        "Datapoints": [
+                            {"protected_attribute": attr, "privleged": f"{float(privileged_rate) * 100:.2f}%", "ratio": float(privileged_rate)}
+                        ]
+                    })
+
+            elif metric == "Equalized Odds":
+                for attr, measures in performance_measures.items():
+                    privileged_tpr = self.true_positive_rate(privileged=attr)
+                    results["Gauge"].append({
+                        "metric": metric,
+                        "Datapoints": [
+                            {"protected_attribute": attr, "rate": float(privileged_tpr)}
+                        ]
+                    })
+
+            elif metric == "Predictive Rate Parity":
+                for attr, measures in performance_measures.items():
+                    privileged_ppv = self.positive_predictive_value(privileged=attr)
+                    results["Gauge"].append({
+                        "metric": metric,
+                        "Datapoints": [
+                            {"protected_attribute": attr, "rate": float(privileged_ppv)}
+                        ]
+                    })
+
+            # Add charts dynamically
+            for attr, measures in performance_measures.items():
+                results["charts"].append({
+                    "ChartName": f"{attr} Group",
+                    "Datapoints": [
+                        {"SeriesName": "True Positive", "Value": int(measures['tp'])},
+                        {"SeriesName": "True Negative", "Value": int(measures['tn'])},
+                        {"SeriesName": "False Positive", "Value": int(measures['fp'])},
+                        {"SeriesName": "False Negative", "Value": int(measures['fn'])}
+                    ]
+                })
+
+        return results
+
+    def selection_rate(self, privileged=None):
+        measures = self._compute_performance_measures()
+        if privileged:
+            tp, fp, tn, fn = measures[privileged].values()
+        else:
+            total_counts = self._combined_count()
+            tp, fp, tn, fn = total_counts
+        return (tp + fp) / (tp + fp + tn + fn)
+
+    def true_positive_rate(self, privileged=None):
+        measures = self._compute_performance_measures()
+        if privileged:
+            tp, _, _, fn = measures[privileged].values()
+        else:
+            total_counts = self._combined_count()
+            tp, _, _, fn = total_counts
+        return tp / (tp + fn)
+
+    def positive_predictive_value(self, privileged=None):
+        measures = self._compute_performance_measures()
+        if privileged:
+            tp, fp, _, _ = measures[privileged].values()
+        else:
+            total_counts = self._combined_count()
+            tp, fp, _, _ = total_counts
+        return tp / (tp + fp)
+
+    def _combined_count(self):
+        measures = self._compute_performance_measures()
+        total_counts = np.sum([list(metrics.values()) for metrics in measures.values()], axis=0)
+        return total_counts
+
+
+    @staticmethod
+    def get_static_info():
+        return {
+            "domain": ["Healthcare", "Finance", "Manufacturing", "Others"],
+            "protected_attribute": ["GENDER", "RACE", "AGE", "Marital Status", "CHILDREN"],
+            "metrics": ["Demographic Parity", "Equalized Odds", "Equality of Opportunity", "Predictive Rate Parity"],
+            "model": ["Random Forest", "XGBoost", "SVM", "Logistic Regression"],
+            "metadata": {"errorMessage": "", "isSuccess": True, "status": 200}
+        }
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    # Check if 'file' is in request.files and 'protected_attribute' and 'metrics' in request.form
+    file = request.files.get('file')
+    protected_attributes = request.form.getlist('protected_attribute')
+    selected_metrics = request.form.getlist('metrics')
+
+    if not file:
+        return jsonify({"error": "File is required"}), 400
+
+    if not file.filename.endswith('.csv'):
+        return jsonify({"error": "Invalid file format. Only CSV files are supported."}), 400
+
+    if not protected_attributes or not selected_metrics:
+        return jsonify({"error": "Protected attributes and metrics are required"}), 400
+
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(file_path)
+
+    df = pd.read_csv(file_path)
+    
+    # Check for protected attribute columns in the dataframe
+    for attr in protected_attributes:
+        if attr not in df.columns:
+            return jsonify({"error": f"Column '{attr}' not found in the uploaded file"}), 400
+
+    results = {
+        "Gauge": [],
+        "Table": [],
+        "charts": [],
+        "metadata": {"errorMessage": "", "isSuccess": True, "status": 200},
+        "status": 200
+    }
+
+    for attr in protected_attributes:
+        protected_attr_values = df[attr].values
+        input_data = {"file": file_path}
+        model = ClassificationModelFairnessMetrics(input_data, protected_attr_values)
+        
+        for metric in selected_metrics:
+            metric_results = model.detect_bias([attr], [metric])
+            
+            # Extend results based on metric results
+            results["Gauge"].extend(metric_results.get("Gauge", []))
+            results["Table"].extend(metric_results.get("Table", []))
+            results["charts"].extend(metric_results.get("charts", []))
+
+    return jsonify(results), 200
+
+@app.route('/static-info', methods=['GET'])
+def get_static_info():
+    return jsonify(ClassificationModelFairnessMetrics.get_static_info()), 200
+
+if __name__ == '__main__':
+    app.run(debug=True)
