@@ -1,0 +1,133 @@
+def detect_bias(self, selected_attributes, metrics):
+    self.infer_privileged_group()
+    results = {
+        "Gauge": [],
+        "Table": [],
+        "charts": [],
+        "metadata": {"errorMessage": "", "isSuccess": True, "status": 200},
+        "final_bias": {}  # Store the final single value for each metric
+    }
+
+    performance_measures = self._compute_performance_measures()
+
+    for metric in metrics:
+        metric_disparity = {}  # Store disparities for each protected attribute
+
+        if metric == "Demographic Parity":
+            privileged_rate = self.selection_rate(privileged=self.privileged_group)
+            for attr in selected_attributes:
+                non_privileged_rate = self.selection_rate(privileged=attr)
+                disparity = non_privileged_rate / privileged_rate if privileged_rate else 0
+                metric_disparity[attr] = disparity
+
+                results["Gauge"].append({
+                    "metric": metric,
+                    "Datapoints": [
+                        {"protected_attribute": attr, "rate": disparity}
+                    ]
+                })
+                results["Table"].append({
+                    "metric": metric,
+                    "Datapoints": [
+                        {
+                            "protected_attribute": attr,
+                            "privleged": f"{privileged_rate * 100:.2f}%",
+                            "non_privleged": f"{non_privileged_rate * 100:.2f}%",
+                            "ratio": disparity
+                        }
+                    ]
+                })
+
+        elif metric == "Equalized Odds":
+            privileged_tpr = self.true_positive_rate(privileged=self.privileged_group)
+            for attr in selected_attributes:
+                non_privileged_tpr = self.true_positive_rate(privileged=attr)
+                disparity = non_privileged_tpr / privileged_tpr if privileged_tpr else 0
+                metric_disparity[attr] = disparity
+
+                results["Gauge"].append({
+                    "metric": metric,
+                    "Datapoints": [
+                        {"protected_attribute": attr, "rate": disparity}
+                    ]
+                })
+                results["Table"].append({
+                    "metric": metric,
+                    "Datapoints": [
+                        {
+                            "protected_attribute": attr,
+                            "privleged": f"{privileged_tpr * 100:.2f}%",
+                            "non_privleged": f"{non_privileged_tpr * 100:.2f}%",
+                            "ratio": disparity
+                        }
+                    ]
+                })
+
+        elif metric == "Predictive Rate Parity":
+            privileged_ppv = self.positive_predictive_value(privileged=self.privileged_group)
+            for attr in selected_attributes:
+                non_privileged_ppv = self.positive_predictive_value(privileged=attr)
+                disparity = non_privileged_ppv / privileged_ppv if privileged_ppv else 0
+                metric_disparity[attr] = disparity
+
+                results["Gauge"].append({
+                    "metric": metric,
+                    "Datapoints": [
+                        {"protected_attribute": attr, "rate": disparity}
+                    ]
+                })
+                results["Table"].append({
+                    "metric": metric,
+                    "Datapoints": [
+                        {
+                            "protected_attribute": attr,
+                            "privleged": f"{privileged_ppv * 100:.2f}%",
+                            "non_privleged": f"{non_privileged_ppv * 100:.2f}%",
+                            "ratio": disparity
+                        }
+                    ]
+                })
+
+        elif metric == "Equality of Opportunity":
+            privileged_tpr = self.true_positive_rate(privileged=self.privileged_group)
+            for attr in selected_attributes:
+                non_privileged_tpr = self.true_positive_rate(privileged=attr)
+                disparity = non_privileged_tpr / privileged_tpr if privileged_tpr else 0
+                metric_disparity[attr] = disparity
+
+                results["Gauge"].append({
+                    "metric": metric,
+                    "Datapoints": [
+                        {"protected_attribute": attr, "rate": disparity}
+                    ]
+                })
+                results["Table"].append({
+                    "metric": metric,
+                    "Datapoints": [
+                        {
+                            "protected_attribute": attr,
+                            "privleged": f"{privileged_tpr * 100:.2f}%",
+                            "non_privleged": f"{non_privileged_tpr * 100:.2f}%",
+                            "ratio": disparity
+                        }
+                    ]
+                })
+
+        # Calculate the final_bias as the average disparity across all attributes for the current metric
+        if metric_disparity:
+            final_bias_value = sum(metric_disparity.values()) / len(metric_disparity)
+            results["final_bias"][metric] = final_bias_value
+
+        # Add charts dynamically for each attribute
+        for attr, measures in performance_measures.items():
+            results["charts"].append({
+                "ChartName": f"{attr} Group",
+                "Datapoints": [
+                    {"SeriesName": "True Positive", "Value": int(measures['tp'])},
+                    {"SeriesName": "True Negative", "Value": int(measures['tn'])},
+                    {"SeriesName": "False Positive", "Value": int(measures['fp'])},
+                    {"SeriesName": "False Negative", "Value": int(measures['fn'])}
+                ]
+            })
+
+    return results
