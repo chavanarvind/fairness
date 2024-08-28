@@ -1,0 +1,190 @@
+from flask import Flask, request, jsonify
+import pandas as pd
+import numpy as np
+from werkzeug.utils import secure_filename
+import os
+from sklearn.metrics import confusion_matrix
+from RLPredictionEngine.Data.ArtifactStoreManager import ArtifactStoreManager, Artifact
+from RLPredictionEngine.Logger import AIStudioLogger
+from RLPredictionEngine.Data.DataCoordinator import DataCoordinatorClass
+from RLPredictionEngine.ModelEvaluation.APIMLModelEvaluatorDynamic import MLClassifierTester
+from RLPredictionEngine.Configuration import configuration as cfg
+
+
+class ClassificationModelFairnessMetrics:
+    def __init__(self, input_data: dict):
+        self.mlflow_run_id: str = input_data.get("mlflow_run_id")
+        self.artifact_uri: str = input_data.get("artifact_uri")
+        self.model_name: str = input_data.get("model_name")
+        self.target = input_data.get("target")
+        self.metrices = input_data.get("metrics")
+
+        self.standard_model_name = cfg.ML_MODELS_DICT.get(self.model_name)
+        if self.standard_model_name is not None:
+            self.model_name = cfg.ML_MODELS_DICT.get(self.model_name)
+
+        self.protected_attribute = input_data.get("protected_attribute")
+        self.logger: AIStudioLogger = AIStudioLogger.get_instance()
+        self.data_coordinator = DataCoordinatorClass(self.logger)
+        self.artifact_manager: ArtifactStoreManager = ArtifactStoreManager.get_instance()
+
+        self.df = self.artifact_manager.read_artifact(self.artifact_uri, f"Predictions_{self.standard_model_name}", Artifact.CSV)
+        self.y_true = self.df[self.target].values
+        self.y_pred = self.df['Prediction'].values
+
+    def infer_privileged_group(self):
+        unique, counts = np.unique(self.protected_attribute, return_counts=True)
+        self.privileged_group = unique[np.argmax(counts)]
+
+    def _compute_performance_measures(self):
+        measures = {}
+        unique_protected_attributes = np.unique(self.protected_attribute)
+
+        for attr in unique_protected_attributes:
+            indices = np.where(self.protected_attribute == attr)[0]
+            y_true_group = self.y_true[indices]
+            y_pred_group = self.y_pred[indices]
+            tn, fp, fn, tp = confusion_matrix(y_true_group, y_pred_group, labels=[0, 1]).ravel()
+            measures[attr] = {'tp': tp.item(), 'fp': fp.item(), 'tn': tn.item(), 'fn': fn.item()}
+
+        return measures
+
+    def detect_bias(self):
+        try:
+            self.infer_privileged_group()
+            results = {
+                "Gauge": [],
+                "Table": [],
+                "charts": [],
+                "metadata": {"errorMessage": "", "isSuccess": True, "status": 200}
+            }
+
+            performance_measures = self._compute_performance_measures()
+
+            for metric in self.metrices:
+                disparity = None
+                if metric == "Demographic Parity":
+                    rates = []
+                    for attr, measures in performance_measures.items():
+                        rate = self.selection_rate(privileged=attr)
+                        rates.append((attr, rate))
+                        results["Gauge"].append({
+                            "metric": metric,
+                            "Datapoints": [
+                                {"protected_attribute": attr, "rate": float(rate)}
+                            ]
+                        })
+
+                        results["Table"].append({
+                            "metric": metric,
+                            "Datapoints": [
+                                {"protected_attribute": attr, "privileged": f"{float(rate) * 100:.2f}%", "ratio": float(rate)}
+                            ]
+                        })
+
+                    privileged_rate = dict(rates)[self.privileged_group]
+                    unprivileged_rate = dict(rates)[next(attr for attr in dict(rates) if attr != self.privileged_group)]
+                    disparity = (unprivileged_rate / privileged_rate) if privileged_rate != 0 else None
+                    results["Gauge"][-1]["disparity"] = disparity
+                    results["Table"][-1]["disparity"] = disparity
+
+                elif metric == "Equalized Odds":
+                    rates = []
+                    for attr, measures in performance_measures.items():
+                        rate = self.true_positive_rate(privileged=attr)
+                        rates.append((attr, rate))
+                        results["Gauge"].append({
+                            "metric": metric,
+                            "Datapoints": [
+                                {"protected_attribute": attr, "rate": float(rate)}
+                            ]
+                        })
+
+                    privileged_rate = dict(rates)[self.privileged_group]
+                    unprivileged_rate = dict(rates)[next(attr for attr in dict(rates) if attr != self.privileged_group)]
+                    disparity = (unprivileged_rate / privileged_rate) if privileged_rate != 0 else None
+                    results["Gauge"][-1]["disparity"] = disparity
+
+                elif metric == "Predictive Rate Parity":
+                    rates = []
+                    for attr, measures in performance_measures.items():
+                        rate = self.positive_predictive_value(privileged=attr)
+                        rates.append((attr, rate))
+                        results["Gauge"].append({
+                            "metric": metric,
+                            "Datapoints": [
+                                {"protected_attribute": attr, "rate": float(rate)}
+                            ]
+                        })
+
+                    privileged_rate = dict(rates)[self.privileged_group]
+                    unprivileged_rate = dict(rates)[next(attr for attr in dict(rates) if attr != self.privileged_group)]
+                    disparity = (unprivileged_rate / privileged_rate) if privileged_rate != 0 else None
+                    results["Gauge"][-1]["disparity"] = disparity
+
+                # Add charts dynamically
+                for attr, measures in performance_measures.items():
+                    results["charts"].append({
+                        "ChartName": f"{attr} Group",
+                        "Datapoints": [
+                            {"SeriesName": "True Positive", "Value": int(measures['tp'])},
+                            {"SeriesName": "True Negative", "Value": int(measures['tn'])},
+                            {"SeriesName": "False Positive", "Value": int(measures['fp'])},
+                            {"SeriesName": "False Negative", "Value": int(measures['fn'])}
+                        ]
+                    })
+
+            return results
+        except Exception as e:
+            self.logger.error(str(e))
+
+    def selection_rate(self, privileged=None):
+        try:
+            measures = self._compute_performance_measures()
+            if privileged:
+                tp, fp, tn, fn = measures[privileged].values()
+            else:
+                total_counts = self._combined_count()
+                tp, fp, tn, fn = total_counts
+            return (tp + fp) / (tp + fp + tn + fn)
+        except Exception as e:
+            self.logger.error("in selection_rate", e)
+
+    def true_positive_rate(self, privileged=None):
+        try:
+            measures = self._compute_performance_measures()
+            if privileged:
+                tp, _, _, fn = measures[privileged].values()
+            else:
+                total_counts = self._combined_count()
+                tp, _, _, fn = total_counts
+            return tp / (tp + fn)
+        except Exception as e:
+            self.logger.error("in true_positive_rate", e)
+
+    def positive_predictive_value(self, privileged=None):
+        try:
+            measures = self._compute_performance_measures()
+            if privileged:
+                tp, fp, _, _ = measures[privileged].values()
+            else:
+                total_counts = self._combined_count()
+                tp, fp, _, _ = total_counts
+            return tp / (tp + fp)
+        except Exception as e:
+            self.logger.error("in positive_predictive_value", e)
+
+    def _combined_count(self):
+        measures = self._compute_performance_measures()
+        total_counts = np.sum([list(metrics.values()) for metrics in measures.values()], axis=0)
+        return total_counts
+
+    @staticmethod
+    def get_static_info():
+        return {
+            "domain": ["Healthcare", "Finance", "Manufacturing", "Others"],
+            "protected_attribute": ["GENDER", "RACE", "AGE", "Marital Status", "CHILDREN"],
+            "metrics": ["Demographic Parity", "Equalized Odds", "Equality of Opportunity", "Predictive Rate Parity"],
+            "model": ["Random Forest", "XGBoost", "SVM", "Logistic Regression"],
+            "metadata": {"errorMessage": "", "isSuccess": True, "status": 200}
+        }
